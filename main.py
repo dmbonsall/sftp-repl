@@ -336,6 +336,20 @@ def configure_readline(sftp_client: SFTPClient):
     readline.set_completer_delims(" \n\t")
 
 
+alias = {
+    "ll": ["ls", "-l", "-h"],
+    "l": ["ls", "-l", "-h"],
+}
+
+commands = {
+    "ls": ls,
+    "cd": cd,
+    "get": get,
+    "put": put,
+    "pwd": pwd,
+}
+
+
 def _repl_main(sftp_client: SFTPClient, url: SftpUrl) -> int:
     configure_readline(sftp_client)
     sftp_client.chdir(url.path or "/")
@@ -353,19 +367,18 @@ def _repl_main(sftp_client: SFTPClient, url: SftpUrl) -> int:
             continue
 
         tokens = shlex.split(user_input)
+        if tokens[0] in alias:
+            tokens = alias[tokens[0]] + tokens[1:]
+
         match tokens:
             case ["exit"] | ["quit"]:
                 return 0
-            case ["ls", *args]:
-                ls(sftp_client, *args)
-            case ["cd", *args]:
-                cd(sftp_client, *args)
-            case ["pwd", *args]:
+            case ["pwd"]:
                 console.print(cwd)
-            case ["get", *args]:
-                get(sftp_client, *args)
-            case ["put", *args]:
-                put(sftp_client, *args)
+            case [command, *args] if command in commands:
+                commands[command](sftp_client, *args)
+            case [command, *_] if command in {"exit", "quit", "help", "pwd"}:
+                console.print(f"[red]pwd: too many args[/red]")
             case _:
                 console.print(f"Unrecognized command: {user_input}")
 
