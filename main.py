@@ -2,13 +2,15 @@ import shlex
 import stat
 import sys
 from argparse import ArgumentParser, ArgumentError
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Annotated
 import readline
 import time
 
 import typer
 from paramiko.client import WarningPolicy
+from paramiko.sftp_attr import SFTPAttributes
 from paramiko.sftp_client import SFTPClient
 from pydantic import UrlConstraints, TypeAdapter
 from pydantic.networks import AnyUrl
@@ -20,6 +22,48 @@ from rich.progress import Progress
 
 console = Console()
 SftpUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["sftp"])]
+
+
+def is_dir(sftp_attr: SFTPAttributes) -> bool:
+    return stat.S_IFMT(sftp_attr.st_mode) == stat.S_IFDIR
+
+
+def format_completion(parent, sftp_attr: SFTPAttributes):
+    parent = "" if parent == "." else f"{parent}/"
+    if is_dir(sftp_attr):
+        return f"{parent}{sftp_attr.filename}/"
+    return f"{parent}{sftp_attr.filename}"
+
+
+@dataclass
+class Completer:
+    sftp_client: SFTPClient
+
+    def complete(self, text, state):
+        possible_completions = sorted(self.file_completions_for_text(text))
+        if state >= len(possible_completions):
+            return None
+        return possible_completions[state]
+
+    def file_completions_for_text(self, text):
+        path = PurePosixPath(text)
+        if text.endswith("/"):
+            parent, name = text[:-1], ""
+        else:
+            parent, name = str(path.parent), path.name
+
+        try:
+            sftp_attr = self.sftp_client.stat(parent)
+        except IOError:
+            return []
+
+        if not is_dir(sftp_attr):
+            return []
+
+        files = self.sftp_client.listdir_attr(parent)
+        return [
+            format_completion(parent, f) for f in files if f.filename.startswith(name)
+        ]
 
 
 def format_name(sftp_attr):
@@ -125,7 +169,7 @@ def long_listing(sftp_attr, human_readable=False):
 def ls(sftp_client: SFTPClient, *args):
     """List files in the specified directory."""
     parser = ArgumentParser("ls", add_help=False, exit_on_error=False)
-    parser.add_argument("path", nargs="?", default=".", help="Path to list")
+    parser.add_argument("path", nargs="?", default=".", type=Path, help="Path to list")
     parser.add_argument("--help", action="store_true", help="Show")
     parser.add_argument(
         "-l", action="store_true", dest="long", help="Long listing format"
@@ -144,20 +188,26 @@ def ls(sftp_client: SFTPClient, *args):
         console.print(parser.format_help())
         return
 
-    files = sftp_client.listdir_attr(args.path)
-    if args.long:
-        for file in sorted(
-            files,
-            key=lambda f: f.filename.lower(),
-        ):
-            console.print(
-                long_listing(file, human_readable=args.human), highlight=False
-            )
-    else:
-        formatted_files = [
-            format_name(f) for f in sorted(files, key=lambda f: f.filename.lower())
-        ]
-        console.print(Columns(formatted_files))
+    try:
+        files = [sftp_client.stat(str(args.path))]
+        files[0].filename = args.path.name
+        if is_dir(files[0]):
+            files = sftp_client.listdir_attr(str(args.path))
+        if args.long:
+            for file in sorted(
+                files,
+                key=lambda f: f.filename.lower(),
+            ):
+                console.print(
+                    long_listing(file, human_readable=args.human), highlight=False
+                )
+        else:
+            formatted_files = [
+                format_name(f) for f in sorted(files, key=lambda f: f.filename.lower())
+            ]
+            console.print(Columns(formatted_files))
+    except IOError as ex:
+        console.print(f"[red]{ex}[/red] ")
 
 
 def cd(sftp_client: SFTPClient, *args):
@@ -271,10 +321,25 @@ def main(connection_str: str):
         return _repl_main(client.open_sftp(), url)
 
 
+def configure_readline(sftp_client: SFTPClient):
+    readline.set_completer(Completer(sftp_client).complete)
+
+    # from python cmd library
+    if readline.backend == "editline":
+        command_string = "bind ^I rl_complete"
+    else:
+        command_string = f"tab: complete"
+    readline.parse_and_bind(command_string)
+
+    # This is so we get the full path passed as the text arg to the completer, but
+    # the completer should probable just be made smarter
+    readline.set_completer_delims(" \n\t")
+
+
 def _repl_main(sftp_client: SFTPClient, url: SftpUrl) -> int:
+    configure_readline(sftp_client)
     sftp_client.chdir(url.path or "/")
     while True:
-
         cwd = sftp_client.getcwd()
         ps1 = f"[green]{url.username}@{url.host}[/green]:[blue]{cwd}[/blue] > "
         try:
