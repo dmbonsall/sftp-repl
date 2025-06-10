@@ -28,11 +28,36 @@ def is_dir(sftp_attr: SFTPAttributes) -> bool:
     return stat.S_IFMT(sftp_attr.st_mode) == stat.S_IFDIR
 
 
-def format_completion(parent, sftp_attr: SFTPAttributes):
-    parent = "" if parent == "." else f"{parent}/"
+def format_completion(sftp_attr: SFTPAttributes):
     if is_dir(sftp_attr):
-        return f"{parent}{sftp_attr.filename}/"
-    return f"{parent}{sftp_attr.filename}"
+        return f"{sftp_attr.filename}/"
+    return f"{sftp_attr.filename}"
+
+
+@dataclass
+class Token:
+    text: str
+    start: int
+    end: int
+
+
+def tokenize(line: str) -> list[Token]:
+    str_tokens = shlex.split(line)
+    tokens = []
+    start = 0
+    for token in str_tokens:
+        start = line[start:].find(token)
+        end = start + len(token)
+        tokens.append(Token(text=token, start=start, end=end))
+    return tokens
+
+
+def locate_full_token(tokens: list[Token], begin: int, end: int):
+    for token in tokens:
+        if begin >= token.start and begin <= token.end:
+            assert end <= token.end, "End of token is expected to be within the token"
+            return token
+    assert False, "unreachable code"
 
 
 @dataclass
@@ -46,9 +71,13 @@ class Completer:
         return possible_completions[state]
 
     def file_completions_for_text(self, text):
-        path = PurePosixPath(text)
-        if text.endswith("/"):
-            parent, name = text[:-1], ""
+        line = readline.get_line_buffer()
+        tokens = tokenize(line)
+        token = locate_full_token(tokens, readline.get_begidx(), readline.get_endidx())
+
+        path = PurePosixPath(token.text)
+        if text == "":
+            parent, name = str(path), ""
         else:
             parent, name = str(path.parent), path.name
 
@@ -61,9 +90,7 @@ class Completer:
             return []
 
         files = self.sftp_client.listdir_attr(parent)
-        return [
-            format_completion(parent, f) for f in files if f.filename.startswith(name)
-        ]
+        return [format_completion(f) for f in files if f.filename.startswith(name)]
 
 
 def format_name(sftp_attr):
@@ -331,10 +358,6 @@ def configure_readline(sftp_client: SFTPClient):
         command_string = f"tab: complete"
     readline.parse_and_bind(command_string)
 
-    # This is so we get the full path passed as the text arg to the completer, but
-    # the completer should probable just be made smarter
-    readline.set_completer_delims(" \n\t")
-
 
 alias = {
     "ll": ["ls", "-l", "-h"],
@@ -346,7 +369,6 @@ commands = {
     "cd": cd,
     "get": get,
     "put": put,
-    "pwd": pwd,
 }
 
 
