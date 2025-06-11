@@ -2,10 +2,13 @@ import shlex
 import stat
 import sys
 from argparse import ArgumentParser, ArgumentError
-from dataclasses import dataclass
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Annotated
-import readline
+
+# import readline
+import gnureadline as readline
 import time
 
 import typer
@@ -15,7 +18,6 @@ from paramiko.sftp_client import SFTPClient
 from pydantic import UrlConstraints, TypeAdapter
 from pydantic.networks import AnyUrl
 from paramiko import SSHClient
-from rich import print
 from rich.columns import Columns
 from rich.console import Console
 from rich.progress import Progress
@@ -29,6 +31,12 @@ def is_dir(sftp_attr: SFTPAttributes) -> bool:
 
 
 def format_completion(sftp_attr: SFTPAttributes):
+    if is_dir(sftp_attr):
+        return f"[bold cyan]{sftp_attr.filename}/[/bold cyan]"
+    return f"{sftp_attr.filename}"
+
+
+def format_completion_no_color(sftp_attr: SFTPAttributes):
     if is_dir(sftp_attr):
         return f"{sftp_attr.filename}/"
     return f"{sftp_attr.filename}"
@@ -63,6 +71,23 @@ def locate_full_token(tokens: list[Token], begin: int, end: int):
 @dataclass
 class Completer:
     sftp_client: SFTPClient
+    url: SftpUrl
+    match_attr_cache: dict[str, SFTPAttributes] = field(default_factory=dict)
+
+    def completion_display_matches_hook(
+        self, substitution: str, matches: Sequence[str], longest_match_length: int
+    ):
+        formatted_matches = [
+            format_completion(self.match_attr_cache[m]) for m in matches
+        ]
+        console.print()
+        console.print(Columns(formatted_matches, padding=(0, 4)), end="", sep="")
+        cwd = self.sftp_client.getcwd()
+        ps1 = (
+            f"[green]{self.url.username}@{self.url.host}[/green]:[blue]{cwd}[/blue] > "
+        )
+        console.print(ps1, readline.get_line_buffer(), end="", sep="")
+        readline.redisplay()
 
     def complete(self, text, state):
         possible_completions = sorted(self.file_completions_for_text(text))
@@ -90,7 +115,12 @@ class Completer:
             return []
 
         files = self.sftp_client.listdir_attr(parent)
-        return [format_completion(f) for f in files if f.filename.startswith(name)]
+        self.match_attr_cache = {
+            format_completion_no_color(f): f
+            for f in files
+            if f.filename.startswith(name)
+        }
+        return list(self.match_attr_cache.keys())
 
 
 def format_name(sftp_attr):
@@ -348,8 +378,9 @@ def main(connection_str: str):
         return _repl_main(client.open_sftp(), url)
 
 
-def configure_readline(sftp_client: SFTPClient):
-    readline.set_completer(Completer(sftp_client).complete)
+def configure_readline(sftp_client: SFTPClient, url: SftpUrl):
+    readline.set_completer((c := Completer(sftp_client, url)).complete)
+    readline.set_completion_display_matches_hook(c.completion_display_matches_hook)
 
     # from python cmd library
     if readline.backend == "editline":
@@ -373,7 +404,7 @@ commands = {
 
 
 def _repl_main(sftp_client: SFTPClient, url: SftpUrl) -> int:
-    configure_readline(sftp_client)
+    configure_readline(sftp_client, url)
     sftp_client.chdir(url.path or "/")
     while True:
         cwd = sftp_client.getcwd()
