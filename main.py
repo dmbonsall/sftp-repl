@@ -69,10 +69,21 @@ def locate_full_token(tokens: list[Token], begin: int, end: int):
 
 
 @dataclass
-class Completer:
+class ConsoleInteractor:
     sftp_client: SFTPClient
     url: SftpUrl
     match_attr_cache: dict[str, SFTPAttributes] = field(default_factory=dict)
+
+    def get_ps1(self) -> str:
+        cwd = self.sftp_client.getcwd()
+        return (
+            f"[green]{self.url.username}@{self.url.host}[/green]:[blue]{cwd}[/blue] > "
+        )
+
+    def get_input(self):
+        with console.capture() as capture:
+            console.print(self.get_ps1(), end="")
+        return input(capture.get())
 
     def completion_display_matches_hook(
         self, substitution: str, matches: Sequence[str], longest_match_length: int
@@ -378,9 +389,11 @@ def main(connection_str: str):
         return _repl_main(client.open_sftp(), url)
 
 
-def configure_readline(sftp_client: SFTPClient, url: SftpUrl):
-    readline.set_completer((c := Completer(sftp_client, url)).complete)
-    readline.set_completion_display_matches_hook(c.completion_display_matches_hook)
+def configure_readline(console_interactor: ConsoleInteractor):
+    readline.set_completer(console_interactor.complete)
+    readline.set_completion_display_matches_hook(
+        console_interactor.completion_display_matches_hook
+    )
 
     # from python cmd library
     if readline.backend == "editline":
@@ -404,15 +417,12 @@ commands = {
 
 
 def _repl_main(sftp_client: SFTPClient, url: SftpUrl) -> int:
-    configure_readline(sftp_client, url)
+    console_interactor = ConsoleInteractor(sftp_client, url)
+    configure_readline(console_interactor)
     sftp_client.chdir(url.path or "/")
     while True:
-        cwd = sftp_client.getcwd()
-        ps1 = f"[green]{url.username}@{url.host}[/green]:[blue]{cwd}[/blue] > "
         try:
-            with console.capture() as capture:
-                console.print(ps1, end="")
-            user_input = input(capture.get())
+            user_input = console_interactor.get_input()
         except EOFError:
             return 0
         except KeyboardInterrupt:
@@ -427,7 +437,7 @@ def _repl_main(sftp_client: SFTPClient, url: SftpUrl) -> int:
             case ["exit"] | ["quit"]:
                 return 0
             case ["pwd"]:
-                console.print(cwd)
+                console.print(sftp_client.getcwd())
             case [command, *args] if command in commands:
                 commands[command](sftp_client, *args)
             case [command, *_] if command in {"exit", "quit", "help", "pwd"}:
