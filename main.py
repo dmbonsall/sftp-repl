@@ -69,20 +69,76 @@ def locate_full_token(tokens: list[Token], begin: int, end: int):
 
 
 @dataclass
+class DirectoryCache:
+    sftp_client: SFTPClient
+    _files_by_directory: dict[PurePosixPath, list[SFTPAttributes]] = field(
+        default_factory=dict
+    )
+    _files_by_fullname: dict[PurePosixPath, SFTPAttributes] = field(
+        default_factory=dict
+    )
+    _cwd: str | None = None
+
+    @property
+    def cwd(self) -> str:
+        if self._cwd is None:
+            self._cwd = self.sftp_client.getcwd()
+        return self._cwd
+
+    def listdir(self, path: PurePosixPath):
+        if path not in self._files_by_directory:
+            try:
+                self._files_by_directory[path] = self.sftp_client.listdir_attr(
+                    str(path)
+                )
+            except IOError:
+                self._files_by_directory[path] = []
+        return self._files_by_directory[path]
+
+    def is_directory(self, path: PurePosixPath) -> bool:
+        if path in self._files_by_directory:
+            return True
+        if path.parent in self._files_by_directory:
+            for file in self._files_by_directory[path.parent]:
+                if file.filename == path.name:
+                    return is_dir(file)
+
+        if path not in self._files_by_fullname:
+            try:
+                sftp_attr = self.sftp_client.stat(str(path))
+            except IOError:
+                return False
+            self._files_by_fullname[path] = sftp_attr
+        return is_dir(self._files_by_fullname[path])
+
+
+@dataclass
 class ConsoleInteractor:
     sftp_client: SFTPClient
     url: SftpUrl
-    match_attr_cache: dict[str, SFTPAttributes] = field(default_factory=dict)
+    _directory_cache: DirectoryCache = None
 
-    def get_ps1(self) -> str:
-        cwd = self.sftp_client.getcwd()
-        return (
-            f"[green]{self.url.username}@{self.url.host}[/green]:[blue]{cwd}[/blue] > "
-        )
+    def __post_init__(self):
+        self._directory_cache = DirectoryCache(self.sftp_client)
+
+    @property
+    def directory_cache(self):
+        return self._directory_cache
+
+    def clear_cache(self):
+        self._directory_cache = DirectoryCache(self.sftp_client)
+
+    @property
+    def cwd(self) -> str:
+        return self._directory_cache.cwd
+
+    @property
+    def ps1(self) -> str:
+        return f"[green]{self.url.username}@{self.url.host}[/green]:[blue]{self.cwd}[/blue] > "
 
     def get_input(self):
         with console.capture() as capture:
-            console.print(self.get_ps1(), end="")
+            console.print(self.ps1, end="")
         return input(capture.get())
 
     def completion_display_matches_hook(
@@ -93,11 +149,7 @@ class ConsoleInteractor:
         ]
         console.print()
         console.print(Columns(formatted_matches, padding=(0, 4)), end="", sep="")
-        cwd = self.sftp_client.getcwd()
-        ps1 = (
-            f"[green]{self.url.username}@{self.url.host}[/green]:[blue]{cwd}[/blue] > "
-        )
-        console.print(ps1, readline.get_line_buffer(), end="", sep="")
+        console.print(self.ps1, readline.get_line_buffer(), end="", sep="")
         readline.redisplay()
 
     def complete(self, text, state):
@@ -113,19 +165,14 @@ class ConsoleInteractor:
 
         path = PurePosixPath(token.text)
         if text == "":
-            parent, name = str(path), ""
+            parent, name = path, ""
         else:
-            parent, name = str(path.parent), path.name
+            parent, name = path.parent, path.name
 
-        try:
-            sftp_attr = self.sftp_client.stat(parent)
-        except IOError:
+        if not self.directory_cache.is_directory(parent):
             return []
 
-        if not is_dir(sftp_attr):
-            return []
-
-        files = self.sftp_client.listdir_attr(parent)
+        files = self.directory_cache.listdir(parent)
         self.match_attr_cache = {
             format_completion_no_color(f): f
             for f in files
@@ -421,6 +468,7 @@ def _repl_main(sftp_client: SFTPClient, url: SftpUrl) -> int:
     configure_readline(console_interactor)
     sftp_client.chdir(url.path or "/")
     while True:
+        console_interactor.clear_cache()
         try:
             user_input = console_interactor.get_input()
         except EOFError:
@@ -437,7 +485,7 @@ def _repl_main(sftp_client: SFTPClient, url: SftpUrl) -> int:
             case ["exit"] | ["quit"]:
                 return 0
             case ["pwd"]:
-                console.print(sftp_client.getcwd())
+                console.print(console_interactor.cwd)
             case [command, *args] if command in commands:
                 commands[command](sftp_client, *args)
             case [command, *_] if command in {"exit", "quit", "help", "pwd"}:
