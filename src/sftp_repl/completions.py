@@ -18,7 +18,7 @@ from paramiko import SFTPAttributes, SFTPClient
 from rich.console import Console
 from rich.columns import Columns
 
-from sftp_cli.utils import SftpUrl
+from sftp_repl.utils import SftpUrl
 
 
 def is_dir(sftp_attr: SFTPAttributes) -> bool:

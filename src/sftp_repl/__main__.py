@@ -13,8 +13,8 @@ from rich.columns import Columns
 from rich.console import Console
 from rich.progress import Progress
 
-from sftp_cli.completions import is_dir, ConsoleInteractor, configure_readline
-from sftp_cli.utils import format_name, long_listing, SftpUrl
+from sftp_repl.completions import is_dir, ConsoleInteractor, configure_readline
+from sftp_repl.utils import format_name, long_listing, SftpUrl
 
 app = typer.Typer()
 console = Console()

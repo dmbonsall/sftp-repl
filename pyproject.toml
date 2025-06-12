@@ -1,7 +1,7 @@
 [project]
-name = "sftp_cli"
+name = "sftp-repl"
 version = "0.1.0"
-description = "Add your description here"
+description = "Interactive REPL to interact with an SFTP server"
 readme = "README.md"
 authors = [
     { name = "David Bonsall", email = "6549165+dmbonsall@users.noreply.github.com" }
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-sftp-cli = "sftp_cli.__main__:app"
+sftp-cli = "sftp_repl.__main__:app"
 
 [build-system]
 requires = ["hatchling"]
