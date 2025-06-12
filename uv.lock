@@ -336,9 +336,9 @@ wheels = [
 ]
 
 [[package]]
-name = "sftp"
+name = "sftp-cli"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "black" },
     { name = "gnureadline" },

@@ -1,8 +1,11 @@
 [project]
-name = "sftp"
+name = "sftp_cli"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
+authors = [
+    { name = "David Bonsall", email = "6549165+dmbonsall@users.noreply.github.com" }
+]
 requires-python = ">=3.13"
 dependencies = [
     "black>=25.1.0",
@@ -11,3 +14,10 @@ dependencies = [
     "pydantic>=2.11.5",
     "typer>=0.16.0",
 ]
+
+[project.scripts]
+sftp-cli = "sftp_cli.__main__:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
