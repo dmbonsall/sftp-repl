@@ -36,6 +36,8 @@ def parse_args(parser, args: Sequence[str]):
         console.print(parser.format_help())
         raise ParserError()
 
+    return args
+
 
 def ls(sftp_client: SFTPClient, *args):
     """List files in the specified directory."""
@@ -76,7 +78,7 @@ def cd(sftp_client: SFTPClient, *args):
     parser = ArgumentParser("cd", add_help=False, exit_on_error=False)
     parser.add_argument("path", help="Path to change to")
     parser.add_argument("--help", action="store_true", help="Show")
-    args = parse_args(args)
+    args = parse_args(parser, args)
 
     try:
         sftp_client.chdir(args.path)
@@ -91,7 +93,7 @@ def get(sftp_client: SFTPClient, *args):
         "dst", type=Path, nargs="?", default=None, help="destination path"
     )
     parser.add_argument("--help", action="store_true", help="Show")
-    args = parse_args(args)
+    args = parse_args(parser, args)
 
     if args.dst is None:
         args.dst = args.src.name
@@ -127,7 +129,7 @@ def put(sftp_client: SFTPClient, *args):
         "dst", type=Path, nargs="?", default=None, help="destination path"
     )
     parser.add_argument("--help", action="store_true", help="Show")
-    args = parse_args(args)
+    args = parse_args(parser, args)
 
     if args.dst is None:
         args.dst = args.src.name
@@ -191,7 +193,7 @@ def _repl_main(sftp_client: SFTPClient, url: SftpUrl):
             case ["exit"] | ["quit"]:
                 raise typer.Exit()
             case ["pwd"]:
-                console.print(console_interactor.cwd)
+                console.print(f"[bold cyan]{console_interactor.cwd}[/bold cyan]")
             case [command, *args] if command in COMMANDS:
                 try:
                     COMMANDS[command](sftp_client, *args)

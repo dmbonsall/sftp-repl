@@ -13,7 +13,7 @@ def format_name(sftp_attr: SFTPAttributes) -> str:
     kind = stat.S_IFMT(sftp_attr.st_mode)
     filename = getattr(sftp_attr, "filename", "?")
     if kind == stat.S_IFDIR:
-        return f"[bold cyan]{filename}[/bold cyan]"
+        return f"[bold cyan]{filename}/[/bold cyan]"
     if kind == stat.S_IFLNK:
         return f"[purple]{filename}[/purple]"
     return filename

@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-sftp-cli = "sftp_repl.__main__:app"
+sftp-repl = "sftp_repl.__main__:app"
 
 [build-system]
 requires = ["hatchling"]
