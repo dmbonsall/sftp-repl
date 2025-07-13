@@ -1,11 +1,13 @@
+import fnmatch
 import shlex
 import sys
 from argparse import ArgumentParser, ArgumentError
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Sequence
 
 import typer
 from paramiko.client import WarningPolicy
+from paramiko.sftp_attr import SFTPAttributes
 from paramiko.sftp_client import SFTPClient
 from pydantic import TypeAdapter
 from paramiko import SSHClient
@@ -39,10 +41,33 @@ def parse_args(parser, args: Sequence[str]):
     return args
 
 
+def search_glob(
+    sftp_client: SFTPClient, current_dir: PurePath, glob_parts: Sequence[str]
+) -> list[tuple[PurePath, SFTPAttributes]]:
+    if not glob_parts:
+        return [(current_dir, sftp_client.stat(str(current_dir)))]
+
+    matching_files = []
+    files = sftp_client.listdir_attr(str(current_dir))
+    for file in files:
+        if fnmatch.fnmatch(file.filename, glob_parts[0]):
+            if len(glob_parts) == 1:
+                matching_files.append((current_dir / file.filename, file))
+            else:
+                matching_files.extend(
+                    search_glob(
+                        sftp_client, current_dir / file.filename, glob_parts[1:]
+                    )
+                )
+    return matching_files
+
+
 def ls(sftp_client: SFTPClient, *args):
     """List files in the specified directory."""
     parser = ArgumentParser("ls", add_help=False, exit_on_error=False)
-    parser.add_argument("path", nargs="?", default=".", type=Path, help="Path to list")
+    parser.add_argument(
+        "path", nargs="?", default=".", type=PurePath, help="Path to list"
+    )
     parser.add_argument("--help", action="store_true", help="Show")
     parser.add_argument(
         "-l", action="store_true", dest="long", help="Long listing format"
@@ -53,25 +78,50 @@ def ls(sftp_client: SFTPClient, *args):
     args = parse_args(parser, args)
 
     try:
-        files = [sftp_client.stat(str(args.path))]
-        files[0].filename = args.path.name
-        if is_dir(files[0]):
-            files = sftp_client.listdir_attr(str(args.path))
-        if args.long:
-            for file in sorted(
-                files,
-                key=lambda f: f.filename.lower(),
-            ):
-                console.print(
-                    long_listing(file, human_readable=args.human), highlight=False
-                )
-        else:
-            formatted_files = [
-                format_name(f) for f in sorted(files, key=lambda f: f.filename.lower())
-            ]
-            console.print(Columns(formatted_files))
+        matching_files = search_glob(
+            sftp_client, PurePath(args.path.root or "."), args.path.parts
+        )
+        multi = len(matching_files) > 1
+        prev_listing = False
+        for path, sftp_attr in sorted(
+            matching_files, key=lambda pf: (is_dir(pf[1]), str(pf[0]).lower())
+        ):
+            if is_dir(sftp_attr):
+                attrs = sftp_client.listdir_attr(str(path))
+                if multi:
+                    files = [(a.filename, a) for a in attrs]
+                    console.print(
+                        f"{'\n' if prev_listing else ''}[bold cyan]{path}[/bold cyan]:",
+                        highlight=False,
+                    )
+                else:
+                    files = [(a.filename, a) for a in attrs]
+            else:
+                files = [(str(path), sftp_attr)]
+
+            _list_files(files, args.human, args.long)
+            prev_listing = True
+
     except IOError as ex:
         console.print(f"[red]{ex}[/red]")
+
+
+def _list_files(files: list[tuple[str, SFTPAttributes]], human: bool, long: bool):
+    if long:
+        for name, file in sorted(
+            files,
+            key=lambda f: f[0].lower(),
+        ):
+            console.print(
+                long_listing(name, file, human_readable=human),
+                highlight=False,
+            )
+    else:
+        formatted_files = [
+            format_name(name, f)
+            for name, f in sorted(files, key=lambda f: f[0].lower())
+        ]
+        console.print(Columns(formatted_files))
 
 
 def cd(sftp_client: SFTPClient, *args):
@@ -185,7 +235,9 @@ def _repl_main(sftp_client: SFTPClient, url: SftpUrl):
             print("\n")
             continue
 
-        tokens = shlex.split(user_input)
+        tokens = shlex.split(user_input.strip())
+        if not tokens:
+            continue
         if tokens[0] in ALIAS:
             tokens = ALIAS[tokens[0]] + tokens[1:]
 

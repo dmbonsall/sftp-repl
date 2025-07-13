@@ -9,9 +9,10 @@ from pydantic import AnyUrl, UrlConstraints
 SftpUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["sftp"])]
 
 
-def format_name(sftp_attr: SFTPAttributes) -> str:
+def format_name(name: str, sftp_attr: SFTPAttributes) -> str:
     kind = stat.S_IFMT(sftp_attr.st_mode)
-    filename = getattr(sftp_attr, "filename", "?")
+    # filename = getattr(sftp_attr, "filename", "?")
+    filename = name
     if kind == stat.S_IFDIR:
         return f"[bold cyan]{filename}/[/bold cyan]"
     if kind == stat.S_IFLNK:
@@ -37,7 +38,7 @@ def human_readable_size(size: int) -> str:
     return f"{ssize:.1f}{label}"
 
 
-def long_listing(sftp_attr, human_readable=False) -> str:
+def long_listing(name: str, sftp_attr, human_readable=False) -> str:
     """create a unix-style long description of the file (like ls -l).
 
     Copied from paramiko and updated
@@ -83,7 +84,7 @@ def long_listing(sftp_attr, human_readable=False) -> str:
             datestr = time.strftime("%d %b %Y", time_tuple)
         else:
             datestr = time.strftime("%d %b %H:%M", time_tuple)
-    filename = format_name(sftp_attr)
+    filename = format_name(name, sftp_attr)
 
     # not all servers support uid/gid
     uid = sftp_attr.st_uid
