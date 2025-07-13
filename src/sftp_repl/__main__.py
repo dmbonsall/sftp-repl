@@ -66,7 +66,7 @@ def ls(sftp_client: SFTPClient, *args):
     """List files in the specified directory."""
     parser = ArgumentParser("ls", add_help=False, exit_on_error=False)
     parser.add_argument(
-        "path", nargs="?", default=".", type=PurePath, help="Path to list"
+        "paths", nargs="*", default=[PurePath(".")], type=PurePath, help="Path to list"
     )
     parser.add_argument("--help", action="store_true", help="Show")
     parser.add_argument(
@@ -78,9 +78,11 @@ def ls(sftp_client: SFTPClient, *args):
     args = parse_args(parser, args)
 
     try:
-        matching_files = search_glob(
-            sftp_client, PurePath(args.path.root or "."), args.path.parts
-        )
+        matching_files = []
+        for path in args.paths:
+            matching_files.extend(
+                search_glob(sftp_client, PurePath(path.root or "."), path.parts)
+            )
         multi = len(matching_files) > 1
         prev_listing = False
         for path, sftp_attr in sorted(

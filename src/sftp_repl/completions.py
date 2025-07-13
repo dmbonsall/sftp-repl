@@ -49,7 +49,7 @@ def tokenize(line: str) -> list[Token]:
     tokens = []
     start = 0
     for token in str_tokens:
-        start = line[start:].find(token)
+        start = line[start:].find(token) + start
         end = start + len(token)
         tokens.append(Token(text=token, start=start, end=end))
     return tokens
