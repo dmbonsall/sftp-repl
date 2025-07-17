@@ -3,7 +3,7 @@ import shlex
 import sys
 from argparse import ArgumentParser, ArgumentError
 from pathlib import Path, PurePath
-from typing import Sequence
+from typing import Sequence, Iterable
 
 import typer
 from paramiko.client import WarningPolicy
@@ -62,6 +62,17 @@ def search_glob(
     return matching_files
 
 
+def expand_path_globs(
+    paths: Iterable[PurePath], sftp_client: SFTPClient
+) -> list[tuple[PurePath, SFTPAttributes]]:
+    matching_files = []
+    for path in paths:
+        matching_files.extend(
+            search_glob(sftp_client, PurePath(path.root or "."), path.parts)
+        )
+    return matching_files
+
+
 def ls(sftp_client: SFTPClient, *args):
     """List files in the specified directory."""
     parser = ArgumentParser("ls", add_help=False, exit_on_error=False)
@@ -78,11 +89,7 @@ def ls(sftp_client: SFTPClient, *args):
     args = parse_args(parser, args)
 
     try:
-        matching_files = []
-        for path in args.paths:
-            matching_files.extend(
-                search_glob(sftp_client, PurePath(path.root or "."), path.parts)
-            )
+        matching_files = expand_path_globs(args.paths, sftp_client)
         multi = len(matching_files) > 1
         prev_listing = False
         for path, sftp_attr in sorted(
@@ -210,6 +217,25 @@ def put(sftp_client: SFTPClient, *args):
             progress.update(task, completed=1, total=1, refresh=True)
 
 
+def rm(sftp_client: SFTPClient, *args):
+    parser = ArgumentParser("rm", add_help=False, exit_on_error=False)
+    parser.add_argument("paths", nargs="+", type=PurePath, help="Path to list")
+    parser.add_argument("--help", action="store_true", help="Show")
+
+    args = parse_args(parser, args)
+
+    try:
+        matching_files = expand_path_globs(args.paths, sftp_client)
+        for path, sftp_attr in matching_files:
+            if is_dir(sftp_attr):
+                console.print(f"[red]{path}: is a directory[/red]")
+                return
+            sftp_client.remove(str(path))
+
+    except IOError as ex:
+        console.print(f"[red]{ex}[/red]")
+
+
 ALIAS = {
     "ll": ["ls", "-l", "-h"],
     "l": ["ls", "-l", "-h"],
@@ -220,6 +246,7 @@ COMMANDS = {
     "cd": cd,
     "get": get,
     "put": put,
+    "rm": rm,
 }
 
 
