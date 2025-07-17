@@ -236,6 +236,25 @@ def rm(sftp_client: SFTPClient, *args):
         console.print(f"[red]{ex}[/red]")
 
 
+def rmdir(sftp_client: SFTPClient, *args):
+    parser = ArgumentParser("rmdir", add_help=False, exit_on_error=False)
+    parser.add_argument("directories", nargs="+", type=PurePath, help="Path to list")
+    parser.add_argument("--help", action="store_true", help="Show")
+
+    args = parse_args(parser, args)
+
+    try:
+        matching_files = expand_path_globs(args.directories, sftp_client)
+        for path, sftp_attr in matching_files:
+            if not is_dir(sftp_attr):
+                console.print(f"[red]{path}: Not a directory[/red]")
+                return
+            sftp_client.rmdir(str(path))
+
+    except IOError as ex:
+        console.print(f"[red]{ex}[/red]")
+
+
 ALIAS = {
     "ll": ["ls", "-l", "-h"],
     "l": ["ls", "-l", "-h"],
@@ -247,6 +266,7 @@ COMMANDS = {
     "get": get,
     "put": put,
     "rm": rm,
+    "rmdir": rmdir,
 }
 
 
