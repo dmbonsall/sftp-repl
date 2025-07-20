@@ -1,5 +1,6 @@
 import fnmatch
 import getpass
+import glob
 import shlex
 import sys
 from argparse import ArgumentParser, ArgumentError
@@ -201,38 +202,51 @@ def get(sftp_client: SFTPClient, *args):
 
 def put(sftp_client: SFTPClient, *args):
     parser = ArgumentParser("put", add_help=False, exit_on_error=False)
-    parser.add_argument("src", type=Path, help="source path")
+    parser.add_argument("src", type=str, help="source path")
     parser.add_argument(
-        "dst", type=Path, nargs="?", default=None, help="destination path"
+        "dst", type=PurePath, nargs="?", default=PurePath("."), help="destination path"
     )
     parser.add_argument("--help", action="store_true", help="Show")
     args = parse_args(parser, args)
 
-    if args.dst is None:
-        args.dst = args.src.name
+    matching_files = glob.glob(args.src)
+    if not matching_files:
+        console.print(f"[red]File {args.src} not found")
+        return
 
-    with Progress() as progress:
-        full_path = (Path(sftp_client.getcwd()) / args.dst).absolute()
-        task = progress.add_task(
-            f"[cyan]Uploading {args.src} to {full_path}[/cyan]",
-        )
+    try:
+        dst_attr = sftp_client.stat(str(args.dst))
+    except IOError:
+        dst_attr = None
 
-        update_called = False
+    if len(matching_files) > 1 and (dst_attr is None or not is_dir(dst_attr)):
+        console.print(f"[red]{args.dst}: Not a directory")
+        return
 
-        def _update(current, total):
-            # for empty files
-            nonlocal update_called
-            update_called = True
-            if total == 0:
-                total, current = 1, 1
-            progress.update(task, completed=current, total=total, refresh=True)
+    for src in matching_files:
+        src_path = Path(src)
+        with Progress() as progress:
+            dst_name = (
+                args.dst / src_path.name if dst_attr and is_dir(dst_attr) else args.dst
+            )
+            task = progress.add_task(
+                f"[cyan]Uploading {src} to {dst_name}[/cyan]",
+            )
 
-        try:
-            sftp_client.put(str(args.src), str(args.dst), callback=_update)
-        except IOError as ex:
-            console.print(f"[red]{ex}[/red] ")
-        if not update_called:
-            progress.update(task, completed=1, total=1, refresh=True)
+            update_called = False
+
+            def _update(current, total):
+                # for empty files
+                nonlocal update_called
+                update_called = True
+                if total == 0:
+                    total, current = 1, 1
+                progress.update(task, completed=current, total=total, refresh=True)
+
+            sftp_client.put(str(src), str(dst_name), callback=_update)
+
+            if not update_called:
+                progress.update(task, completed=1, total=1, refresh=True)
 
 
 @handle_io_error(console)
