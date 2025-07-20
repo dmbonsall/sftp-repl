@@ -1,4 +1,5 @@
 import fnmatch
+import getpass
 import shlex
 import sys
 from argparse import ArgumentParser, ArgumentError
@@ -363,6 +364,7 @@ def _repl_main(sftp_client: SFTPClient, url: SftpUrl):
 @app.command()
 def main(connection_str: str):
     url = TypeAdapter(SftpUrl).validate_python(connection_str)
+    password = url.password or getpass.getpass("password: ")
     with SSHClient() as client:
         client.load_system_host_keys()
         client.set_missing_host_key_policy(WarningPolicy())
@@ -370,7 +372,7 @@ def main(connection_str: str):
             hostname=url.host,
             port=url.port or 22,
             username=url.username,
-            password=url.password,
+            password=password,
         )
         print(f"Connected to {url.host}:{url.port or 22} as {url.username}")
         return _repl_main(client.open_sftp(), url)
