@@ -1,8 +1,9 @@
+import os
 import shlex
 import stat
 import sys
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, Path
 from typing import Sequence
 
 import readline
@@ -177,7 +178,7 @@ class ConsoleInteractor:
         return list(self.match_attr_cache.keys())
 
 
-def configure_readline(console_interactor: ConsoleInteractor):
+def configure_readline(console_interactor: ConsoleInteractor) -> Path | None:
     readline.set_completer(console_interactor.complete)
     if readline.backend == "readline" or sys.platform != "darwin":
         # MacOS default implementation of editline doesn't work with the hook, this
@@ -192,3 +193,13 @@ def configure_readline(console_interactor: ConsoleInteractor):
     else:
         command_string = f"tab: complete"
     readline.parse_and_bind(command_string)
+
+    if home := os.getenv("HOME"):
+        history_file = Path(home) / ".sftp_history"
+        if history_file.is_file():
+            readline.read_history_file(history_file)
+        else:
+            history_file.open("w").close()
+        readline.set_auto_history(True)
+        readline.set_history_length(1000)
+        return history_file

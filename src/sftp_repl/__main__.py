@@ -17,7 +17,12 @@ from rich.columns import Columns
 from rich.console import Console
 from rich.progress import Progress
 
-from sftp_repl.completions import is_dir, ConsoleInteractor, configure_readline
+from sftp_repl.completions import (
+    is_dir,
+    ConsoleInteractor,
+    configure_readline,
+    readline,
+)
 from sftp_repl.utils import format_name, long_listing, SftpUrl, handle_io_error
 
 app = typer.Typer()
@@ -312,7 +317,7 @@ COMMANDS = {
 
 def _repl_main(sftp_client: SFTPClient, url: SftpUrl):
     console_interactor = ConsoleInteractor(console, sftp_client, url)
-    configure_readline(console_interactor)
+    history_file = configure_readline(console_interactor)
     sftp_client.chdir(url.path or "/")
     while True:
         console_interactor.clear_cache()
@@ -344,6 +349,9 @@ def _repl_main(sftp_client: SFTPClient, url: SftpUrl):
                 console.print(f"[red]pwd: too many args[/red]")
             case _:
                 console.print(f"Unrecognized command: {user_input}")
+
+        if history_file:
+            readline.write_history_file(history_file)
 
     raise RuntimeError("Unreachable code")
 
