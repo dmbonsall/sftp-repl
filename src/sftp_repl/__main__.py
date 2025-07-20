@@ -3,6 +3,7 @@ import shlex
 import sys
 from argparse import ArgumentParser, ArgumentError
 from pathlib import Path, PurePath
+from tempfile import TemporaryDirectory
 from typing import Sequence, Iterable
 
 import typer
@@ -255,6 +256,55 @@ def rmdir(sftp_client: SFTPClient, *args):
         console.print(f"[red]{ex}[/red]")
 
 
+def mkdir(sftp_client: SFTPClient, *args):
+    parser = ArgumentParser("rmdir", add_help=False, exit_on_error=False)
+    parser.add_argument("directories", nargs="+", type=PurePath, help="Path to list")
+    parser.add_argument("--help", action="store_true", help="Show")
+
+    args = parse_args(parser, args)
+
+    try:
+        for path in args.directories:
+            sftp_client.mkdir(str(path))
+    except IOError as ex:
+        console.print(f"[red]{ex}[/red]")
+
+
+def cp(sftp_client: SFTPClient, *args):
+    parser = ArgumentParser("cp", add_help=False, exit_on_error=False)
+    parser.add_argument("src", nargs="+", type=PurePath, help="Path to list")
+    parser.add_argument("dst", type=PurePath, help="Path to list")
+    parser.add_argument("--help", action="store_true", help="Show")
+
+    args = parse_args(parser, args)
+
+    try:
+        src_matching_files = expand_path_globs(args.src, sftp_client)
+
+        try:
+            dst_attr = sftp_client.stat(str(args.dst))
+        except IOError:
+            dst_attr = None
+
+        if len(src_matching_files) > 1 and (dst_attr is None or not is_dir(dst_attr)):
+            console.print(f"[red]{args.dst}: Not a directory")
+            return
+
+        with TemporaryDirectory() as tmp_dir:
+            tmp_dir_path = Path(tmp_dir)
+            for src_file, sftp_attr in src_matching_files:
+                dst_name = (
+                    args.dst / src_file.name
+                    if dst_attr and is_dir(dst_attr)
+                    else args.dst
+                )
+                sftp_client.get(str(src_file), str(tmp_dir_path / src_file.name))
+                sftp_client.put(str(tmp_dir_path / src_file.name), str(dst_name))
+
+    except IOError as ex:
+        console.print(f"[red]{ex}[/red]")
+
+
 ALIAS = {
     "ll": ["ls", "-l", "-h"],
     "l": ["ls", "-l", "-h"],
@@ -267,6 +317,8 @@ COMMANDS = {
     "put": put,
     "rm": rm,
     "rmdir": rmdir,
+    "mkdir": mkdir,
+    "cp": cp,
 }
 
 
