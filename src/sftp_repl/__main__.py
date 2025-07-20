@@ -282,13 +282,17 @@ def mkdir(sftp_client: SFTPClient, *args):
 @handle_io_error(console)
 def cp(sftp_client: SFTPClient, *args):
     parser = ArgumentParser("cp", add_help=False, exit_on_error=False)
-    parser.add_argument("src", nargs="+", type=PurePath, help="Path to list")
+    parser.add_argument("src", type=PurePath, help="Path to list")
     parser.add_argument("dst", type=PurePath, help="Path to list")
     parser.add_argument("--help", action="store_true", help="Show")
 
     args = parse_args(parser, args)
 
-    src_matching_files = expand_path_globs(args.src, sftp_client)
+    src_matching_files = expand_path_globs([args.src], sftp_client)
+
+    if not src_matching_files:
+        console.print(f"[red]File {args.src} not found")
+        return
 
     try:
         dst_attr = sftp_client.stat(str(args.dst))
