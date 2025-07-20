@@ -152,40 +152,51 @@ def cd(sftp_client: SFTPClient, *args):
     sftp_client.chdir(args.path)
 
 
+@handle_io_error(console)
 def get(sftp_client: SFTPClient, *args):
     parser = ArgumentParser("get", add_help=False, exit_on_error=False)
     parser.add_argument("src", type=Path, help="source path")
     parser.add_argument(
-        "dst", type=Path, nargs="?", default=None, help="destination path"
+        "dst", type=Path, nargs="?", default=Path("."), help="destination path"
     )
     parser.add_argument("--help", action="store_true", help="Show")
     args = parse_args(parser, args)
 
-    if args.dst is None:
-        args.dst = args.src.name
+    matching_files = expand_path_globs([args.src], sftp_client)
 
-    with Progress() as progress:
-        full_path = (Path(sftp_client.getcwd()) / args.src).absolute()
-        task = progress.add_task(
-            f"[cyan]Fetching {full_path} to {args.dst}[/cyan]",
-        )
+    if not matching_files:
+        console.print(f"[red]File {args.src} not found")
+        return
 
-        update_called = False
+    if len(matching_files) > 1 and not args.dst.is_dir():
+        console.print(f"[red]{args.dst}: Not a directory")
+        return
 
-        def _update(current, total):
-            # for empty files
-            nonlocal update_called
-            update_called = True
-            if total == 0:
-                total, current = 1, 1
-            progress.update(task, completed=current, total=total, refresh=True)
+    for src, src_attrs in matching_files:
+        if is_dir(src_attrs):
+            console.print(f"[red]{src} is a directory")
+            continue
 
-        try:
-            sftp_client.get(str(args.src), str(args.dst), callback=_update)
-        except IOError as ex:
-            console.print(f"[red]{ex}[/red] ")
-        if not update_called:
-            progress.update(task, completed=1, total=1, refresh=True)
+        with Progress() as progress:
+            dst_name = args.dst / src.name if args.dst.is_dir() else args.dst
+            task = progress.add_task(
+                f"[cyan]Fetching {src} to {dst_name}[/cyan]",
+            )
+
+            update_called = False
+
+            def _update(current, total):
+                # for empty files
+                nonlocal update_called
+                update_called = True
+                if total == 0:
+                    total, current = 1, 1
+                progress.update(task, completed=current, total=total, refresh=True)
+
+            sftp_client.get(str(src), str(dst_name), callback=_update)
+
+            if not update_called:
+                progress.update(task, completed=1, total=1, refresh=True)
 
 
 def put(sftp_client: SFTPClient, *args):
