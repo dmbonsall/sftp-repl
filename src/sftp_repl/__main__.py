@@ -298,6 +298,32 @@ def cp(sftp_client: SFTPClient, *args):
             sftp_client.put(str(tmp_dir_path / src_file.name), str(dst_name))
 
 
+@handle_io_error(console)
+def mv(sftp_client: SFTPClient, *args):
+    parser = ArgumentParser("cp", add_help=False, exit_on_error=False)
+    parser.add_argument("src", nargs="+", type=PurePath, help="Path to list")
+    parser.add_argument("dst", type=PurePath, help="Path to list")
+    parser.add_argument("--help", action="store_true", help="Show")
+    args = parse_args(parser, args)
+
+    src_matching_files = expand_path_globs(args.src, sftp_client)
+
+    try:
+        dst_attr = sftp_client.stat(str(args.dst))
+    except IOError:
+        dst_attr = None
+
+    if len(src_matching_files) > 1 and (dst_attr is None or not is_dir(dst_attr)):
+        console.print(f"[red]{args.dst}: Not a directory")
+        return
+
+    for src_file, sftp_attr in src_matching_files:
+        dst_name = (
+            args.dst / src_file.name if dst_attr and is_dir(dst_attr) else args.dst
+        )
+        sftp_client.posix_rename(str(src_file), str(dst_name))
+
+
 ALIAS = {
     "ll": ["ls", "-l", "-h"],
     "l": ["ls", "-l", "-h"],
@@ -312,6 +338,7 @@ COMMANDS = {
     "rmdir": rmdir,
     "mkdir": mkdir,
     "cp": cp,
+    "mv": mv,
 }
 
 
@@ -346,7 +373,7 @@ def _repl_main(sftp_client: SFTPClient, url: SftpUrl):
                 except ParserError:
                     pass
             case [command, *_] if command in {"exit", "quit", "help", "pwd"}:
-                console.print(f"[red]pwd: too many args[/red]")
+                console.print(f"[red]{command}: too many args[/red]")
             case _:
                 console.print(f"Unrecognized command: {user_input}")
 
