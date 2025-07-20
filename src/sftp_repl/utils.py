@@ -1,10 +1,11 @@
+import functools
 import stat
 import time
 from typing import Annotated
 
 from paramiko.sftp_attr import SFTPAttributes
 from pydantic import AnyUrl, UrlConstraints
-
+from rich.console import Console
 
 SftpUrl = Annotated[AnyUrl, UrlConstraints(allowed_schemes=["sftp"])]
 
@@ -108,3 +109,17 @@ def long_listing(name: str, sftp_attr, human_readable=False) -> str:
         datestr,
         filename,
     )
+
+
+def handle_io_error(console: Console):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*a, **k):
+            try:
+                return func(*a, **k)
+            except IOError as ex:
+                console.print(f"[red]{ex}[/red]")
+
+        return wrapper
+
+    return decorator

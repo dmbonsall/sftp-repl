@@ -18,7 +18,7 @@ from rich.console import Console
 from rich.progress import Progress
 
 from sftp_repl.completions import is_dir, ConsoleInteractor, configure_readline
-from sftp_repl.utils import format_name, long_listing, SftpUrl
+from sftp_repl.utils import format_name, long_listing, SftpUrl, handle_io_error
 
 app = typer.Typer()
 console = Console()
@@ -137,16 +137,14 @@ def _list_files(files: list[tuple[str, SFTPAttributes]], human: bool, long: bool
         console.print(Columns(formatted_files))
 
 
+@handle_io_error(console)
 def cd(sftp_client: SFTPClient, *args):
     parser = ArgumentParser("cd", add_help=False, exit_on_error=False)
     parser.add_argument("path", help="Path to change to")
     parser.add_argument("--help", action="store_true", help="Show")
     args = parse_args(parser, args)
 
-    try:
-        sftp_client.chdir(args.path)
-    except IOError as ex:
-        console.print(f"[red]{ex}[/red] ")
+    sftp_client.chdir(args.path)
 
 
 def get(sftp_client: SFTPClient, *args):
@@ -221,6 +219,7 @@ def put(sftp_client: SFTPClient, *args):
             progress.update(task, completed=1, total=1, refresh=True)
 
 
+@handle_io_error(console)
 def rm(sftp_client: SFTPClient, *args):
     parser = ArgumentParser("rm", add_help=False, exit_on_error=False)
     parser.add_argument("paths", nargs="+", type=PurePath, help="Path to list")
@@ -228,18 +227,15 @@ def rm(sftp_client: SFTPClient, *args):
 
     args = parse_args(parser, args)
 
-    try:
-        matching_files = expand_path_globs(args.paths, sftp_client)
-        for path, sftp_attr in matching_files:
-            if is_dir(sftp_attr):
-                console.print(f"[red]{path}: is a directory[/red]")
-                return
-            sftp_client.remove(str(path))
-
-    except IOError as ex:
-        console.print(f"[red]{ex}[/red]")
+    matching_files = expand_path_globs(args.paths, sftp_client)
+    for path, sftp_attr in matching_files:
+        if is_dir(sftp_attr):
+            console.print(f"[red]{path}: is a directory[/red]")
+            return
+        sftp_client.remove(str(path))
 
 
+@handle_io_error(console)
 def rmdir(sftp_client: SFTPClient, *args):
     parser = ArgumentParser("rmdir", add_help=False, exit_on_error=False)
     parser.add_argument("directories", nargs="+", type=PurePath, help="Path to list")
@@ -247,18 +243,15 @@ def rmdir(sftp_client: SFTPClient, *args):
 
     args = parse_args(parser, args)
 
-    try:
-        matching_files = expand_path_globs(args.directories, sftp_client)
-        for path, sftp_attr in matching_files:
-            if not is_dir(sftp_attr):
-                console.print(f"[red]{path}: Not a directory[/red]")
-                return
-            sftp_client.rmdir(str(path))
-
-    except IOError as ex:
-        console.print(f"[red]{ex}[/red]")
+    matching_files = expand_path_globs(args.directories, sftp_client)
+    for path, sftp_attr in matching_files:
+        if not is_dir(sftp_attr):
+            console.print(f"[red]{path}: Not a directory[/red]")
+            return
+        sftp_client.rmdir(str(path))
 
 
+@handle_io_error(console)
 def mkdir(sftp_client: SFTPClient, *args):
     parser = ArgumentParser("rmdir", add_help=False, exit_on_error=False)
     parser.add_argument("directories", nargs="+", type=PurePath, help="Path to list")
@@ -266,13 +259,11 @@ def mkdir(sftp_client: SFTPClient, *args):
 
     args = parse_args(parser, args)
 
-    try:
-        for path in args.directories:
-            sftp_client.mkdir(str(path))
-    except IOError as ex:
-        console.print(f"[red]{ex}[/red]")
+    for path in args.directories:
+        sftp_client.mkdir(str(path))
 
 
+@handle_io_error(console)
 def cp(sftp_client: SFTPClient, *args):
     parser = ArgumentParser("cp", add_help=False, exit_on_error=False)
     parser.add_argument("src", nargs="+", type=PurePath, help="Path to list")
@@ -281,31 +272,25 @@ def cp(sftp_client: SFTPClient, *args):
 
     args = parse_args(parser, args)
 
+    src_matching_files = expand_path_globs(args.src, sftp_client)
+
     try:
-        src_matching_files = expand_path_globs(args.src, sftp_client)
+        dst_attr = sftp_client.stat(str(args.dst))
+    except IOError:
+        dst_attr = None
 
-        try:
-            dst_attr = sftp_client.stat(str(args.dst))
-        except IOError:
-            dst_attr = None
+    if len(src_matching_files) > 1 and (dst_attr is None or not is_dir(dst_attr)):
+        console.print(f"[red]{args.dst}: Not a directory")
+        return
 
-        if len(src_matching_files) > 1 and (dst_attr is None or not is_dir(dst_attr)):
-            console.print(f"[red]{args.dst}: Not a directory")
-            return
-
-        with TemporaryDirectory() as tmp_dir:
-            tmp_dir_path = Path(tmp_dir)
-            for src_file, sftp_attr in src_matching_files:
-                dst_name = (
-                    args.dst / src_file.name
-                    if dst_attr and is_dir(dst_attr)
-                    else args.dst
-                )
-                sftp_client.get(str(src_file), str(tmp_dir_path / src_file.name))
-                sftp_client.put(str(tmp_dir_path / src_file.name), str(dst_name))
-
-    except IOError as ex:
-        console.print(f"[red]{ex}[/red]")
+    with TemporaryDirectory() as tmp_dir:
+        tmp_dir_path = Path(tmp_dir)
+        for src_file, sftp_attr in src_matching_files:
+            dst_name = (
+                args.dst / src_file.name if dst_attr and is_dir(dst_attr) else args.dst
+            )
+            sftp_client.get(str(src_file), str(tmp_dir_path / src_file.name))
+            sftp_client.put(str(tmp_dir_path / src_file.name), str(dst_name))
 
 
 ALIAS = {
