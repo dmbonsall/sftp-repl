@@ -48,6 +48,8 @@ def search_glob(
 ) -> list[tuple[PurePath, SFTPAttributes]]:
     if not glob_parts:
         return [(current_dir, sftp_client.stat(str(current_dir)))]
+    if glob_parts[0] == "..":
+        return search_glob(sftp_client, current_dir / "..", glob_parts[1:])
 
     matching_files = []
     files = sftp_client.listdir_attr(str(current_dir))
